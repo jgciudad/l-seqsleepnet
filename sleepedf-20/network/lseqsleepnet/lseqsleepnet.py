@@ -11,7 +11,7 @@ class LSeqSleepNet(object):
         self.config = config
 
         self.input_x = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.frame_seq_len, self.config.ndim, self.config.nchannel], name="input_x")
-        self.input_y = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass], name="input_y")
+        self.input_y = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass_data], name="input_y")
 
         self.dropout_rnn = tf.placeholder(tf.float32, name="dropout_rnn")
         self.istraining = tf.placeholder(tf.bool, name='istraining') # idicate training for batch normmalization
@@ -43,18 +43,32 @@ class LSeqSleepNet(object):
             fc1 = dropout(fc1, self.dropout_rnn)
             fc2 = fc(fc1, self.config.fc_size, self.config.fc_size, name="fc2", relu=True)
             fc2 = dropout(fc2, self.dropout_rnn)
-            self.score = fc(fc2, self.config.fc_size, self.config.nclass, name="output", relu=False)
+            self.score = fc(fc2, self.config.fc_size, self.config.nclass_model, name="output", relu=False)
             self.prediction = tf.argmax(self.score, 1, name="pred")
-            self.score = tf.reshape(self.score, [-1, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass])
+            self.score = tf.reshape(self.score, [-1, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass_model])
             self.prediction = tf.reshape(self.prediction, [-1, self.config.nsubseq, self.config.sub_seq_len])
 
         # calculate sequence cross-entropy output loss
-        self.output_loss = 0.0
         with tf.name_scope("output-loss"):
-            y = tf.reshape(self.input_y, [-1, self.config.nclass])
-            logit = tf.reshape(self.score, [-1, self.config.nclass])
-            self.output_loss += tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(labels=y, logits=logit), axis=[0])
-            self.output_loss /= (self.config.nsubseq * self.config.sub_seq_len)  # average over sequence length
+            y = tf.reshape(self.input_y, [-1, self.config.nclass_data])
+            logit = tf.reshape(self.score, [-1, self.config.nclass_model])
+            input_y_categorical = tf.math.argmax(y, -1) # dummy labels to numbers
+            scores = tf.nn.softmax(logit)
+
+            if self.config.nclass_model == self.config.nclass_data:
+                cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+            elif self.config.nclass_model != self.config.nclass_data and self.config.artifacts_label != None:
+                artifacts_column = tf.zeros([tf.shape(scores)[0],1])
+                scores = tf.concat([scores, artifacts_column], 1)
+
+                artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
+                artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+
+                cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                cce = tf.multiply(cce, artifact_mask)
+
+            cce = tf.reduce_sum(cce)
+            self.output_loss = cce / (self.config.nsubseq * self.config.sub_seq_len) #CHANGE denominator to include batch size?
 
         # add on L2-norm regularization (excluding the filter bank layers)
         with tf.name_scope("l2_loss"):
@@ -66,15 +80,55 @@ class LSeqSleepNet(object):
                     if v not in except_vars_eeg and v not in except_vars_eog and v not in except_vars_emg])
             self.loss = self.output_loss + self.config.l2_reg_lambda*l2_loss
 
-        # accuracy metric at each time index of the input sequence
-        self.accuracy = []
         with tf.name_scope("accuracy"):
-            y = tf.reshape(self.input_y, [-1, self.config.nsubseq * self.config.sub_seq_len, self.config.nclass])
-            yhat = tf.reshape(self.prediction, [-1, self.config.nsubseq * self.config.sub_seq_len])
-            for i in range(self.config.nsubseq * self.config.sub_seq_len):
-                correct_prediction_i = tf.equal(yhat[:, i], tf.argmax(tf.squeeze(y[:, i, :]), 1))
-                accuracy_i = tf.reduce_mean(tf.cast(correct_prediction_i, "float"), name="accuracy-%s" % i)
-                self.accuracy.append(accuracy_i)
+            y = tf.reshape(self.input_y, [-1, self.config.nclass_data])
+            input_y_categorical = tf.math.argmax(y, -1) # dummy labels to numbers
+            yhat = tf.reshape(self.prediction, [-1,])
+
+            correct_prediction = tf.equal(yhat, input_y_categorical)
+            correct_prediction = tf.where(correct_prediction, tf.ones(tf.shape(correct_prediction)), tf.zeros(tf.shape(correct_prediction)))
+
+            if self.config.nclass_model == self.config.nclass_data:
+                self.accuracy = tf.reduce_sum(tf.cast(correct_prediction, tf.int32)) / tf.size(correct_prediction)
+            elif self.config.nclass_model != self.config.nclass_data and self.config.artifacts_label != None:
+                artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
+                artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+                correct_prediction_masked = tf.multiply(correct_prediction, artifact_mask)
+                self.accuracy = tf.reduce_sum(correct_prediction_masked) / tf.reduce_sum(artifact_mask)
+        
+        self.class_labels=[]
+        with tf.name_scope("balanced_accuracy"):
+            def cond_function_true(prediction_class_i, labels_class_i, recalls_sum, n_classes_in_balanced_accuracy):
+                correct_prediction_class_i = tf.multiply(prediction_class_i, labels_class_i)
+
+                recalls_sum += (tf.reduce_sum(correct_prediction_class_i) / tf.reduce_sum(labels_class_i))
+                n_classes_in_balanced_accuracy += 1
+
+                return [recalls_sum, n_classes_in_balanced_accuracy] 
+
+            def cond_function_false(recalls_sum, n_classes_in_balanced_accuracy):
+                
+                recalls = tf.multiply(recalls_sum, tf.ones(tf.shape(recalls_sum)))
+                n_classes = tf.multiply(n_classes_in_balanced_accuracy, tf.ones(tf.shape(n_classes_in_balanced_accuracy)))
+
+                return [recalls, n_classes] 
+        
+            recalls_sum = 0.0
+            n_classes_in_balanced_accuracy = 0.0
+            
+            input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
+
+            for i in range(self.config.nclass_model):
+                prediction_class_i = tf.equal(self.prediction, i)
+                labels_class_i = tf.equal(input_y_categorical, i)
+                prediction_class_i = tf.where(prediction_class_i, tf.ones(tf.shape(prediction_class_i)), tf.zeros(tf.shape(prediction_class_i))) # boolean artifact mask to binary
+                labels_class_i = tf.where(labels_class_i, tf.ones(tf.shape(labels_class_i)), tf.zeros(tf.shape(labels_class_i))) # boolean artifact mask to binary
+                
+                self.class_labels.append(tf.reduce_sum(labels_class_i))
+
+                [recalls_sum, n_classes_in_balanced_accuracy]  = tf.cond(tf.reduce_sum(labels_class_i) > 0, lambda: cond_function_true(prediction_class_i, labels_class_i, recalls_sum, n_classes_in_balanced_accuracy), lambda: cond_function_false(recalls_sum, n_classes_in_balanced_accuracy))
+
+            self.balanced_accuracy = recalls_sum / n_classes_in_balanced_accuracy
 
     def preprocessing(self, input):
         # input of shape [-1, ndim, nchannel]

@@ -8,7 +8,7 @@ import numpy as np
 import h5py
 
 class DataGenerator3:
-    def __init__(self, list_of_files, file_sizes, data_shape_2=np.array([29, 129]), seq_len = 200):
+    def __init__(self, list_of_files, file_sizes, data_shape_2=np.array([29, 129]), seq_len = 200, Ncat = 4):
         '''
         Mini-batch data generator (L-seqsleepnet only uses time-frequency data). This is very much similar to SeqSleepNet.
         Args:
@@ -29,7 +29,7 @@ class DataGenerator3:
         self.boundary_index = np.array([])
 
         self.seq_len = seq_len
-        self.Ncat = 5 # five-class sleep staging
+        self.Ncat = Ncat # five-class sleep staging
 
         self.pointer = 0
         self.data_index = None
@@ -67,6 +67,7 @@ class DataGenerator3:
         data.keys()
         X2 = np.array(data['X2']) # time-frequency input
         X2 = np.transpose(X2, (2, 1, 0))  # rearrange dimension
+        # X2 = X2[:,:,1:] # excluding 0-th element
         y = np.array(data['y']) # one-hot encoding labels
         y = np.transpose(y, (1, 0))  # rearrange dimension
         label = np.array(data['label']) # labels
@@ -82,7 +83,22 @@ class DataGenerator3:
         X2 = (X2 - meanX2) / stdX2
         self.X2 = np.reshape(X2, (self.data_size, self.data_shape_2[0], self.data_shape_2[1]))
 
-    # shuffle data indices
+    def normalize_by_signal(self, meanX2, stdX2):
+        # data normalization for time-frequency input here
+        count = 0
+        for i in range(len(self.list_of_files)):
+            X2 = self.X2[count: count + self.file_sizes[i]]
+            meanX2_i = meanX2[self.list_of_files[i]]
+            stdX2_i = stdX2[self.list_of_files[i]]
+
+            X2 = np.reshape(X2,(self.file_sizes[i]*self.data_shape_2[0], self.data_shape_2[1]))
+            X2 = (X2 - meanX2_i) / stdX2_i
+            X2 = np.reshape(X2, (self.file_sizes[i], self.data_shape_2[0], self.data_shape_2[1]))
+            self.X2[count: count + self.file_sizes[i]] = X2
+
+            count += self.file_sizes[i]
+
+
     def shuffle_data(self):
         idx = np.random.permutation(len(self.data_index))
         self.data_index = self.data_index[idx]

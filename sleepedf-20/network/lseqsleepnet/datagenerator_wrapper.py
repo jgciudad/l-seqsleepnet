@@ -3,19 +3,9 @@ import h5py
 from datagenerator_from_list_v3 import DataGenerator3
 
 class DataGeneratorWrapper:
-    def __init__(self, eeg_filelist=None, eog_filelist=None, emg_filelist=None, num_fold=1, data_shape_2=np.array([29, 129]), seq_len = 200, shuffle=False):
-        '''
-        Wrapper for data generator
-        Args:
-            eeg_filelist: the file contianing the list of eeg files
-            eog_filelist: the file contianing the list of eog files
-            emg_filelist: the file contianing the list of emg files
-            num_fold: how many folds to divide the data into so that we can load in, do training one after another.
-            This is helpful when memory is limited. when num_fold=1, we load the whole data in one go.
-            data_shape_2: The data shape of one sleep epoch
-            seq_len: sequence length
-            shuffle:
-        '''
+    def __init__(self, eeg_filelist=None, eog_filelist=None, emg_filelist=None, num_fold=1, data_shape_2=np.array([29, 128]), seq_len = 20, nclasses=4, shuffle=False):
+
+        # Init params
 
         self.eeg_list_of_files = []
         self.eog_list_of_files = []
@@ -32,7 +22,7 @@ class DataGeneratorWrapper:
         self.sub_folds = []
 
         self.seq_len = seq_len
-        self.Ncat = 5 # five-class sleep staging
+        self.Ncat = nclasses # five-class sleep staging
 
         self.shuffle = shuffle
 
@@ -69,15 +59,30 @@ class DataGeneratorWrapper:
             return
         self.eeg_meanX, self.eeg_stdX = self.load_data_compute_norm_params(self.eeg_list_of_files)
 
+    def compute_eeg_normalization_params_by_signal(self):
+        if(len(self.eeg_list_of_files) == 0):
+            return
+        self.eeg_meanX, self.eeg_stdX = self.load_data_compute_norm_params_by_signal(self.eeg_list_of_files)
+
     def compute_eog_normalization_params(self):
         if(len(self.eog_list_of_files) == 0):
             return
         self.eog_meanX, self.eog_stdX = self.load_data_compute_norm_params(self.eog_list_of_files)
 
+    def compute_eog_normalization_params_by_signal(self):
+        if(len(self.eog_list_of_files) == 0):
+            return
+        self.eog_meanX, self.eog_stdX = self.load_data_compute_norm_params_by_signal(self.eog_list_of_files)
+
     def compute_emg_normalization_params(self):
         if(len(self.eog_list_of_files) == 0):
             return
         self.emg_meanX, self.emg_stdX = self.load_data_compute_norm_params(self.emg_list_of_files)
+
+    def compute_emg_normalization_params_by_signal(self):
+        if(len(self.eog_list_of_files) == 0):
+            return
+        self.emg_meanX, self.emg_stdX = self.load_data_compute_norm_params_by_signal(self.emg_list_of_files)
 
     def set_eeg_normalization_params(self, meanX, stdX):
         self.eeg_meanX, self.eeg_stdX = meanX, stdX
@@ -115,6 +120,26 @@ class DataGeneratorWrapper:
         varX = -np.multiply(meanX, meanX) + meanXsquared
         stdX = np.sqrt(varX*count/(count-1))
         return meanX, stdX
+
+    def load_data_compute_norm_params_by_signal(self, list_of_files):
+        meanX = None
+        meanXsquared = None
+        count = 0
+        print('Computing normalization parameters')
+        means = {}
+        stds = {}
+        for i in range(len(list_of_files)):
+            X2 = self.read_X2_from_mat_file(list_of_files[i].strip())
+            Ni = len(X2)
+            X2 = np.reshape(X2,(Ni*self.data_shape_2[0], self.data_shape_2[1]))
+
+            meanX_i = X2.mean(axis=0)
+            stdX_i = X2.std(axis=0)
+
+            means[list_of_files[i]] = meanX_i
+            stds[list_of_files[i]] = stdX_i
+
+        return means, stds
 
     # shuffle the subjects for a new partition
     def new_subject_partition(self):
@@ -162,24 +187,27 @@ class DataGeneratorWrapper:
         self.gen = DataGenerator3(list_of_files,
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
-                                 seq_len=self.seq_len)
-        self.gen.normalize(self.eeg_meanX, self.eeg_stdX)
+                                 seq_len=self.seq_len,
+                                 Ncat=self.Ncat)
+        self.gen.normalize_by_signal(self.eeg_meanX, self.eeg_stdX)
 
         if(len(self.eog_list_of_files) > 0):
             list_of_files = [self.eog_list_of_files[i] for i in ind]
             eog_gen = DataGenerator3(list_of_files,
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
-                                 seq_len=self.seq_len)
-            eog_gen.normalize(self.eog_meanX, self.eog_stdX)
+                                 seq_len=self.seq_len,
+                                 Ncat=self.Ncat)
+            eog_gen.normalize_by_signal(self.eog_meanX, self.eog_stdX)
 
         if(len(self.emg_list_of_files) > 0):
             list_of_files = [self.emg_list_of_files[i] for i in ind]
             emg_gen = DataGenerator3(list_of_files,
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
-                                 seq_len=self.seq_len)
-            emg_gen.normalize(self.emg_meanX, self.emg_stdX)
+                                 seq_len=self.seq_len,
+                                 Ncat=self.Ncat)
+            emg_gen.normalize_by_signal(self.emg_meanX, self.emg_stdX)
 
         # 1-channel case when both eog and emg not active
         if(len(self.eog_list_of_files) == 0 and len(self.emg_list_of_files) == 0):
