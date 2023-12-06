@@ -25,7 +25,7 @@ tf.app.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft dev
 tf.app.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
 
 # My Parameters
-tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list_debug.txt", "file containing the list of training EEG data")
+tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list.txt", "file containing the list of training EEG data")
 tf.app.flags.DEFINE_string("eeg_eval_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/eval_list_debug.txt", "file containing the list of evaluation EEG data")
 tf.app.flags.DEFINE_string("eog_train_data", "", "file containing the list of training EOG data")
 tf.app.flags.DEFINE_string("eog_eval_data", "", "file containing the list of evaluation EOG data")
@@ -33,6 +33,7 @@ tf.app.flags.DEFINE_string("emg_train_data", "", "file containing the list of tr
 tf.app.flags.DEFINE_string("emg_eval_data", "", "file containing the list of evaluation EMG data")
 tf.app.flags.DEFINE_string("out_dir", "./outputs/l_seq_sleepnet_train_test/", "Output directory")
 tf.app.flags.DEFINE_string("checkpoint_dir", "./checkpoint/", "Checkpoint directory")
+tf.app.flags.DEFINE_integer("training_epoch", 10, "Number of training epochs (default: 10)")
 
 tf.app.flags.DEFINE_float("dropout_rnn", 0.9, "Dropout keep probability (default: 0.75)")
 tf.app.flags.DEFINE_integer("nfilter", 32, "Sequence length (default: 20)")
@@ -110,6 +111,7 @@ config.early_stop_count = FLAGS.early_stop_count
 config.evaluate_every = FLAGS.evaluate_every
 
 config.max_eval_steps = FLAGS.max_eval_steps
+config.training_epoch = FLAGS.training_epoch*config.sub_seq_len*config.nsubseq
 
 eeg_active = (FLAGS.eeg_train_data != "")
 eog_active = (FLAGS.eog_train_data != "")
@@ -339,8 +341,8 @@ with tf.Graph().as_default():
 
         # test the model first
         # print("{} Start off validation".format(datetime.now()))
-        # eval_acc, eval_yhat, eval_output_loss, eval_total_loss = \
-        #     _evaluate(gen=valid_gen_wrapper.gen, log_filename="eval_result_log.txt")
+        # eval_acc, eval_bal_acc, eval_yhat, eval_output_loss, eval_total_loss = \
+        #     _evaluate(gen=valid_gen_wrapper.gen, log_filename="eval_result_log.txt", config=config)
         # valid_gen_wrapper.gen.reset_pointer()
 
         start_time = time.time()
@@ -352,7 +354,7 @@ with tf.Graph().as_default():
             for data_fold in range(config.num_fold_training_data):
                 train_gen_wrapper.next_fold()
 
-                train_batches_per_epoch = np.floor(len(train_gen_wrapper.gen.data_index) / config.batch_size).astype(np.uint32)
+                train_batches_per_epoch = np.floor(len(train_gen_wrapper.gen.data_index) / config.batch_size / config.sub_seq_len / config.nsubseq).astype(np.uint32)
 
                 step = 1
                 while step < train_batches_per_epoch:
