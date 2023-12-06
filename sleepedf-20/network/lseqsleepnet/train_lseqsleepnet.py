@@ -25,7 +25,7 @@ tf.app.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft dev
 tf.app.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
 
 # My Parameters
-tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list.txt", "file containing the list of training EEG data")
+tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list_debug.txt", "file containing the list of training EEG data")
 tf.app.flags.DEFINE_string("eeg_eval_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/eval_list_debug.txt", "file containing the list of evaluation EEG data")
 tf.app.flags.DEFINE_string("eog_train_data", "", "file containing the list of training EOG data")
 tf.app.flags.DEFINE_string("eog_eval_data", "", "file containing the list of evaluation EOG data")
@@ -34,6 +34,7 @@ tf.app.flags.DEFINE_string("emg_eval_data", "", "file containing the list of eva
 tf.app.flags.DEFINE_string("out_dir", "./outputs/l_seq_sleepnet_train_test/", "Output directory")
 tf.app.flags.DEFINE_string("checkpoint_dir", "./checkpoint/", "Checkpoint directory")
 tf.app.flags.DEFINE_integer("training_epoch", 10, "Number of training epochs (default: 10)")
+tf.app.flags.DEFINE_integer("batch_size", 8, "Number of instances per mini-batch (default: 32)")
 
 tf.app.flags.DEFINE_float("dropout_rnn", 0.9, "Dropout keep probability (default: 0.75)")
 tf.app.flags.DEFINE_integer("nfilter", 32, "Sequence length (default: 20)")
@@ -56,6 +57,7 @@ tf.app.flags.DEFINE_boolean("early_stopping", False, "whether to apply early sto
 tf.app.flags.DEFINE_integer("early_stop_count", 100, "-")
 tf.app.flags.DEFINE_integer("evaluate_every", 100, "-")
 tf.app.flags.DEFINE_string("best_model_criteria", 'balanced_accuracy', "whether to save the model with best 'balanced_accuracy' or 'accuracy' (default: accuracy)")
+tf.app.flags.DEFINE_string("loss_type", 'weighted_ce', "whether to use 'weighted_ce' or 'normal_ce' (default: accuracy)")
 
 # maximum number of evaluation steps to stop training. This can be used to control the number of training steps to be equivalent to SeqSleepNet
 tf.app.flags.DEFINE_integer("max_eval_steps", 110, "Maximum number of evaluation steps to stop training (default: 110)")
@@ -104,6 +106,10 @@ config.artifacts_label = FLAGS.artifacts_label
 config.ndim = FLAGS.ndim
 config.frame_seq_len = FLAGS.frame_seq_len
 config.best_model_criteria = FLAGS.best_model_criteria
+config.loss_type = FLAGS.loss_type
+config.batch_size = FLAGS.batch_size
+config.learning_rate = 1e-4 / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
+config.l2_reg_lambda = config.l2_reg_lambda / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
 
 config.nsubseq = FLAGS.nsubseq
 config.dualrnn_blocks = FLAGS.dualrnn_blocks
@@ -254,6 +260,114 @@ with tf.Graph().as_default():
                 [train_op, global_step, net.output_loss, net.loss, net.accuracy, net.balanced_accuracy],
                 feed_dict)
             
+            # nclass_model = 3
+            # artifacts_label= 3
+            # nclass_data = 4 
+            # nsubseq = 10
+            # sub_seq_len = 5
+            # input_y = tf.convert_to_tensor(input_y)
+            # scores = tf.convert_to_tensor(scores)
+            # loss_type = 'weighted_ce'
+
+            # if loss_type == 'normal_ce':
+            #     input_y_categorical = tf.math.argmax(input_y, -1) # dummy labels to numbers
+            #     input_y_categorical = tf.reshape(input_y_categorical, [-1])
+            #     scores = tf.reshape(scores, [-1, nclass_model])
+            #     scores = tf.nn.softmax(scores)
+
+            #     if nclass_model == nclass_data:
+            #         cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+            #         n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
+
+            #     elif nclass_model != nclass_data and artifacts_label != None:
+            #         artifacts_column = tf.zeros([tf.shape(scores)[0],1])
+            #         scores = tf.concat([scores, artifacts_column], 1)
+
+            #         artifact_mask = tf.not_equal(input_y_categorical, artifacts_label) # artifact mask (boolean)
+            #         artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+
+            #         cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+            #         cce = tf.multiply(cce, artifact_mask)
+
+            #         n_elements_in_batch = tf.reduce_sum(artifact_mask)
+
+
+            #     cce = tf.reduce_sum(cce)
+            #     output_loss2 = cce / sub_seq_len / nsubseq / n_elements_in_batch # average over sequence length and (not-artifacts) elements in batch
+
+            # elif loss_type == 'weighted_ce':
+            #     input_y_categorical = tf.math.argmax(input_y, -1) # dummy labels to numbers
+            #     input_y_categorical = tf.reshape(input_y_categorical, [-1])
+            #     scores = tf.reshape(scores, [-1, nclass_model])
+            #     scores = tf.nn.softmax(scores)
+
+            #     if nclass_model == nclass_data:
+            #         cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+            #         n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
+            #     elif nclass_model != nclass_data and artifacts_label != None:
+            #         artifacts_column = tf.zeros([tf.shape(scores)[0],1])
+            #         scores = tf.concat([scores, artifacts_column], 1)
+
+            #         artifact_mask = tf.not_equal(input_y_categorical, artifacts_label) # artifact mask (boolean)
+            #         artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+
+            #         cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+            #         cce = tf.multiply(cce, artifact_mask)
+
+            #         n_elements_in_batch = tf.reduce_sum(artifact_mask)
+
+            #     class_counts = []
+            #     def cond_function_true_wce(cce, n_elements_in_batch, n_classes_in_batch, labels_class_i_binary, labels_class_i_bool):
+
+            #         w = n_elements_in_batch / (n_classes_in_batch * tf.reduce_sum(labels_class_i_binary))
+            #         weights_mask = tf.where(labels_class_i_bool, w*tf.ones(tf.shape(labels_class_i_bool)), tf.ones(tf.shape(labels_class_i_bool)))
+
+            #         weighted_cce = tf.multiply(cce, weights_mask)
+
+            #         return weighted_cce 
+
+            #     def cond_function_false_wce(cce):
+                    
+            #         identical_cce = tf.multiply(cce, tf.ones(tf.shape(cce)))
+
+            #         return identical_cce
+                
+            #     for i in range(nclass_model):
+            #         labels_class_i = tf.equal(input_y_categorical, i)
+            #         labels_class_i = tf.where(labels_class_i, tf.ones(tf.shape(labels_class_i)), tf.zeros(tf.shape(labels_class_i))) # boolean artifact mask to binary
+                    
+            #         class_counts.append(tf.reduce_sum(labels_class_i))
+                
+            #     n_classes_in_batch = tf.math.count_nonzero(class_counts, dtype=tf.dtypes.float32)
+            #     print('n_classes_in_batch: ', n_classes_in_batch.eval())
+
+            #     print([a.eval() for a in class_counts])
+
+            #     if np.any(input_y_categorical.eval() == 3):
+            #         print('dsvsfvv')
+            #     if n_classes_in_batch.eval()==4:
+            #         print('hrefvdfv')
+            #     elif n_classes_in_batch.eval()==2:
+            #         print('hrefvdfv')
+
+            #     for i in range(nclass_model):
+            #         labels_class_i_bool = tf.equal(input_y_categorical, i)
+            #         labels_class_i_binary = tf.where(labels_class_i_bool, tf.ones(tf.shape(labels_class_i_bool)), tf.zeros(tf.shape(labels_class_i_bool))) # boolean artifact mask to binary
+
+            #         # cce  = tf.cond(tf.reduce_sum(labels_class_i_binary) > 0, lambda: cond_function_true_wce(cce, n_elements_in_batch, n_classes_in_batch, labels_class_i_binary, labels_class_i_bool), lambda: cond_function_false_wce(cce))
+            #         if tf.reduce_sum(labels_class_i_binary).eval() > 0:
+            #             w = n_elements_in_batch / (n_classes_in_batch * tf.reduce_sum(labels_class_i_binary))
+            #             print('w:', w.eval())
+            #             weights_mask = tf.where(labels_class_i_bool, w*tf.ones(tf.shape(labels_class_i_bool)), tf.ones(tf.shape(labels_class_i_bool)))
+            #             print('weights_mask:', weights_mask.eval())
+
+            #             cce = tf.multiply(cce, weights_mask)
+            #         else:
+            #             cce = tf.multiply(cce, tf.ones(tf.shape(cce)))
+
+            #     cce = tf.reduce_sum(cce)
+            #     output_loss2 = cce / sub_seq_len / nsubseq / n_elements_in_batch # average over sequence length and elements in batch
+
             return step, output_loss, total_loss, acc, balanced_accuracy
 
         def dev_step(x_batch, y_batch):
