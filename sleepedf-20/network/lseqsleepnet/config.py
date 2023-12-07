@@ -6,7 +6,7 @@ class Config(object):
 
         self.nsubseq = 10
 
-        self.num_fold_training_data =  1 #7
+        self.num_fold_training_data =  7
 
         self.learning_rate = 1e-4
         self.l2_reg_lambda = 0.0001

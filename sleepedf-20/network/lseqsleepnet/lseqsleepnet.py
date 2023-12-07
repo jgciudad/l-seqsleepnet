@@ -75,7 +75,7 @@ class LSeqSleepNet(object):
 
 
                 cce = tf.reduce_sum(cce)
-                self.output_loss = cce / self.config.sub_seq_len / self.config.nsubseq / n_elements_in_batch # average over sequence length and (not-artifacts) elements in batch
+                self.output_loss = cce / n_elements_in_batch # average over sequence length and (not-artifacts) elements in batch
 
             elif self.config.loss_type == 'weighted_ce':
                 input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
@@ -129,7 +129,7 @@ class LSeqSleepNet(object):
                     cce  = tf.cond(tf.reduce_sum(labels_class_i_binary) > 0, lambda: cond_function_true_wce(cce, n_elements_in_batch, n_classes_in_batch, labels_class_i_binary, labels_class_i_bool), lambda: cond_function_false_wce(cce))
 
                 cce = tf.reduce_sum(cce)
-                self.output_loss = cce / self.config.sub_seq_len / self.config.nsubseq / n_elements_in_batch
+                self.output_loss = cce / n_elements_in_batch
 
         # add on L2-norm regularization (excluding the filter bank layers)
         with tf.name_scope("l2_loss"):

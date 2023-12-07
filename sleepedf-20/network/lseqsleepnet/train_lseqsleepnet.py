@@ -108,7 +108,7 @@ config.frame_seq_len = FLAGS.frame_seq_len
 config.best_model_criteria = FLAGS.best_model_criteria
 config.loss_type = FLAGS.loss_type
 config.batch_size = FLAGS.batch_size
-config.learning_rate = 1e-4 / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
+# config.learning_rate = 1e-4 / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
 config.l2_reg_lambda = config.l2_reg_lambda / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
 
 config.nsubseq = FLAGS.nsubseq
