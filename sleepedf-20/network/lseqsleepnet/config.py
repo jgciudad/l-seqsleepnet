@@ -12,7 +12,9 @@ class Config(object):
         self.l2_reg_lambda = 0.0001
         self.training_epoch = 10*self.sub_seq_len*self.nsubseq
         self.batch_size = 8
-        self.evaluate_every = 100
+        self.evaluate_every = 3800 # there are 76270 batches in one training epoch of the kornum_lab dataset. Right now, evaluating ~20 times per epoch
+        self.early_stop_count = 50 # stop after 50 validation sreps without improvement ~= after 2.5 epochs without improvement
+        self.minimum_training_updates = 60000
         self.checkpoint_every = 100
 
         # spectrogram size

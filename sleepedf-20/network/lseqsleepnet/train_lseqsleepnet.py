@@ -25,8 +25,8 @@ tf.app.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft dev
 tf.app.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
 
 # My Parameters
-tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list_debug.txt", "file containing the list of training EEG data")
-tf.app.flags.DEFINE_string("eeg_eval_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/eval_list_debug.txt", "file containing the list of evaluation EEG data")
+tf.app.flags.DEFINE_string("eeg_train_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/train_list.txt", "file containing the list of training EEG data")
+tf.app.flags.DEFINE_string("eeg_eval_data", "./code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/remote/eeg1/eval_list.txt", "file containing the list of evaluation EEG data")
 tf.app.flags.DEFINE_string("eog_train_data", "", "file containing the list of training EOG data")
 tf.app.flags.DEFINE_string("eog_eval_data", "", "file containing the list of evaluation EOG data")
 tf.app.flags.DEFINE_string("emg_train_data", "", "file containing the list of training EMG data")
@@ -54,8 +54,6 @@ tf.app.flags.DEFINE_integer("sub_seq_len", 5, "Sequence length (default: 32)")
 tf.app.flags.DEFINE_integer("nsubseq", 10, "number of overall segments (default: 9)")
 
 tf.app.flags.DEFINE_boolean("early_stopping", False, "whether to apply early stopping (default: True)")
-tf.app.flags.DEFINE_integer("early_stop_count", 100, "-")
-tf.app.flags.DEFINE_integer("evaluate_every", 100, "-")
 tf.app.flags.DEFINE_string("best_model_criteria", 'balanced_accuracy', "whether to save the model with best 'balanced_accuracy' or 'accuracy' (default: accuracy)")
 tf.app.flags.DEFINE_string("loss_type", 'weighted_ce', "whether to use 'weighted_ce' or 'normal_ce' (default: accuracy)")
 
@@ -113,8 +111,6 @@ config.l2_reg_lambda = config.l2_reg_lambda / FLAGS.batch_size # scaling by btac
 
 config.nsubseq = FLAGS.nsubseq
 config.dualrnn_blocks = FLAGS.dualrnn_blocks
-config.early_stop_count = FLAGS.early_stop_count
-config.evaluate_every = FLAGS.evaluate_every
 
 config.max_eval_steps = FLAGS.max_eval_steps
 config.training_epoch = FLAGS.training_epoch*config.sub_seq_len*config.nsubseq
@@ -454,10 +450,10 @@ with tf.Graph().as_default():
             return acc, bal_acc, yhat, output_loss, total_loss
 
         # test the model first
-        # print("{} Start off validation".format(datetime.now()))
-        # eval_acc, eval_bal_acc, eval_yhat, eval_output_loss, eval_total_loss = \
-        #     _evaluate(gen=valid_gen_wrapper.gen, log_filename="eval_result_log.txt", config=config)
-        # valid_gen_wrapper.gen.reset_pointer()
+        print("{} Start off validation".format(datetime.now()))
+        eval_acc, eval_bal_acc, eval_yhat, eval_output_loss, eval_total_loss = \
+            _evaluate(gen=valid_gen_wrapper.gen, log_filename="eval_result_log.txt", config=config)
+        valid_gen_wrapper.gen.reset_pointer()
 
         start_time = time.time()
         # Loop over number of epochs
@@ -518,15 +514,13 @@ with tf.Graph().as_default():
                         if(FLAGS.early_stopping == True):
                             print('EARLY STOPPING enabled!')
                             # early stopping only after 200 evaluation steps
-                            if (current_step/config.evaluate_every >= 200 and early_stop_count >= config.early_stop_count):
+                            if (early_stop_count >= config.early_stop_count and current_step >= config.minimum_training_updates):
                                 end_time = time.time()
                                 with open(os.path.join(out_dir, "training_time.txt"), "a") as text_file:
                                     text_file.write("{:g}\n".format((end_time - start_time)))
                                 quit()
                         else:
-                            if(current_step/config.evaluate_every >= config.max_eval_steps):
-                                print('Maximum training step reached!')
-                                quit()
+                            print('EARLY STOPPING disabled!')
 
             # train_gen_wrapper.gen.reset_pointer()
             # train_gen_wrapper.gen.shuffle_data()
