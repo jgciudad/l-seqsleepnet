@@ -25,14 +25,11 @@ tf.app.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft dev
 tf.app.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
 
 # My Parameters
-tf.app.flags.DEFINE_string("eeg_train_data", "./train_data_eeg.txt", "file containing the list of training EEG data")
-tf.app.flags.DEFINE_string("eeg_test_data", "./eval_data_eeg.txt", "file containing the list of test EEG data")
-tf.app.flags.DEFINE_string("eog_train_data", "", "file containing the list of training EOG data")
+tf.app.flags.DEFINE_string("eeg_test_data", "", "file containing the list of test EEG data")
 tf.app.flags.DEFINE_string("eog_test_data", "", "file containing the list of test EOG data")
-tf.app.flags.DEFINE_string("emg_train_data", "", "file containing the list of training EMG data")
 tf.app.flags.DEFINE_string("emg_test_data", "", "file containing the list of test EMG data")
 
-tf.app.flags.DEFINE_string("out_dir", "./output/", "Output directory")
+tf.app.flags.DEFINE_string("out_dir", "", "Output directory")
 tf.app.flags.DEFINE_string("checkpoint_dir", "./checkpoint/", "Checkpoint directory")
 
 tf.app.flags.DEFINE_float("dropout_rnn", 0.75, "Dropout keep probability (default: 0.75)")
@@ -41,10 +38,20 @@ tf.app.flags.DEFINE_integer("nhidden1", 64, "Sequence length (default: 20)")
 tf.app.flags.DEFINE_integer("attention_size", 64, "Sequence length (default: 20)")
 tf.app.flags.DEFINE_integer("nhidden2", 64, "Sequence length (default: 20)")
 
+tf.app.flags.DEFINE_integer("batch_size", 8, "Number of instances per mini-batch (default: 32)")
+tf.app.flags.DEFINE_integer("nclass_data", 4, "Number of classes in the data (whether artifacts are discarded or not is controlled in nclass_model)")
+tf.app.flags.DEFINE_integer("nclass_model", 3, "Number of classes for sleep stage prediction (i.e. in mice, if artifacts are discarded, then nclass_model=3)")
+tf.app.flags.DEFINE_integer("artifacts_label", 3, "Categorical label of the artifact class in the data")
+tf.app.flags.DEFINE_integer("ndim", 129, "Sequence length (default: 20)")
+tf.app.flags.DEFINE_integer("frame_seq_len", 17, "Sequence length (default: 20)")
+
 # subsuqence length
 tf.app.flags.DEFINE_integer("sub_seq_len", 10, "Sequence length (default: 32)")
 # number of subsequence
 tf.app.flags.DEFINE_integer("nsubseq", 10, "number of overall segments (default: 9)")
+
+tf.app.flags.DEFINE_string("best_model_criteria", 'balanced_accuracy', "whether to save the model with best 'balanced_accuracy' or 'accuracy' (default: accuracy)")
+tf.app.flags.DEFINE_string("loss_type", 'weighted_ce', "whether to use 'weighted_ce' or 'normal_ce' (default: accuracy)")
 
 tf.app.flags.DEFINE_integer("dualrnn_blocks", 1, "Number of dual rnn blocks (default: 1)")
 
@@ -52,8 +59,14 @@ tf.app.flags.DEFINE_float("gpu_usage", 0.5, "Dropout keep probability (default: 
 
 FLAGS = tf.app.flags.FLAGS
 print("\nParameters:")
-for attr, value in sorted(FLAGS.__flags.items()): # python3
-    print("{}={}".format(attr.upper(), value))
+print(sys.argv[0])
+flags_dict = {}
+for idx, a in enumerate(sys.argv):
+    if a[:2]=="--":
+        flags_dict[a[2:]] = sys.argv[idx+1]
+
+for attr in sorted(flags_dict): # python3
+    print("{}={}".format(attr.upper(), flags_dict[attr]))
 print("")
 
 # path where some output are stored
@@ -63,6 +76,11 @@ checkpoint_path = os.path.abspath(os.path.join(out_path,FLAGS.checkpoint_dir))
 if not os.path.isdir(os.path.abspath(out_path)): os.makedirs(os.path.abspath(out_path))
 if not os.path.isdir(os.path.abspath(checkpoint_path)): os.makedirs(os.path.abspath(checkpoint_path))
 
+with open(os.path.join(out_path,'test_settings.txt'), 'w') as f:
+    for attr in sorted(flags_dict):  # python3
+        f.write("{}={}".format(attr.upper(), flags_dict[attr]))
+        f.write('\n')
+
 config = Config()
 config.dropout_rnn = FLAGS.dropout_rnn
 config.sub_seq_len = FLAGS.sub_seq_len
@@ -71,76 +89,62 @@ config.nhidden1 = FLAGS.nhidden1
 config.nhidden2 = FLAGS.nhidden2
 config.attention_size = FLAGS.attention_size
 
+config.nclass_data = FLAGS.nclass_data
+config.nclass_model = FLAGS.nclass_model
+config.artifacts_label = FLAGS.artifacts_label
+config.ndim = FLAGS.ndim
+config.frame_seq_len = FLAGS.frame_seq_len
+config.best_model_criteria = FLAGS.best_model_criteria
+config.loss_type = FLAGS.loss_type
+config.batch_size = FLAGS.batch_size
+config.l2_reg_lambda = config.l2_reg_lambda / FLAGS.batch_size # scaling by btach size because now I'm normalizing the loss by the number of elements in batch
+
 config.nsubseq = FLAGS.nsubseq
 config.dualrnn_blocks = FLAGS.dualrnn_blocks
 
-eeg_active = (FLAGS.eeg_train_data != "")
-eog_active = (FLAGS.eog_train_data != "")
-emg_active = (FLAGS.emg_train_data != "")
+eeg_active = (FLAGS.eeg_test_data != "")
+eog_active = (FLAGS.eog_test_data != "")
+emg_active = (FLAGS.emg_test_data != "")
 
 if (not eog_active and not emg_active):
     print("eeg active")
-    train_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_train_data),
-                                             num_fold=1,
-                                             data_shape_2=[config.frame_seq_len, config.ndim],
-                                             seq_len = config.sub_seq_len * config.nsubseq,
-                                             shuffle=True)
     test_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_test_data),
-                                             num_fold=1,
+                                             num_fold=config.num_fold_testing_data,
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len = config.sub_seq_len * config.nsubseq,
+                                             nclasses = config.nclass_data,
                                              shuffle=False)
-    train_gen_wrapper.compute_eeg_normalization_params()
-    test_gen_wrapper.set_eeg_normalization_params(train_gen_wrapper.eeg_meanX, train_gen_wrapper.eeg_stdX)
+    test_gen_wrapper.compute_eeg_normalization_params_by_signal()
     nchannel = 1
 
 elif(eog_active and not emg_active):
     print("eeg and eog active")
-    train_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_train_data),
-                                             eog_filelist=os.path.abspath(FLAGS.eog_train_data),
-                                             num_fold=1,
-                                             data_shape_2=[config.frame_seq_len, config.ndim],
-                                             seq_len = config.sub_seq_len * config.nsubseq,
-                                             shuffle=True)
     test_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_test_data),
                                             eog_filelist=os.path.abspath(FLAGS.eog_test_data),
-                                            num_fold=1,
+                                            num_fold=config.num_fold_testing_data,
                                             data_shape_2=[config.frame_seq_len, config.ndim],
                                             seq_len = config.sub_seq_len * config.nsubseq,
+                                            nclasses = config.nclass_data,
                                             shuffle=False)
-    train_gen_wrapper.compute_eeg_normalization_params()
-    train_gen_wrapper.compute_eog_normalization_params()
-    test_gen_wrapper.set_eeg_normalization_params(train_gen_wrapper.eeg_meanX, train_gen_wrapper.eeg_stdX)
-    test_gen_wrapper.set_eog_normalization_params(train_gen_wrapper.eog_meanX, train_gen_wrapper.eog_stdX)
+    test_gen_wrapper.compute_eeg_normalization_params_by_signal()
+    test_gen_wrapper.compute_eog_normalization_params_by_signal()
     nchannel = 2
 elif(eog_active and emg_active):
     print("eeg, eog, and emg active")
-    train_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_train_data),
-                                             eog_filelist=os.path.abspath(FLAGS.eog_train_data),
-                                             emg_filelist=os.path.abspath(FLAGS.emg_train_data),
-                                             num_fold=1,
-                                             data_shape_2=[config.frame_seq_len, config.ndim],
-                                             seq_len = config.sub_seq_len * config.nsubseq,
-                                             shuffle=True)
     test_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_test_data),
                                             eog_filelist=os.path.abspath(FLAGS.eog_test_data),
                                             emg_filelist=os.path.abspath(FLAGS.emg_test_data),
-                                            num_fold=1,
+                                            num_fold=config.num_fold_testing_data,
                                             data_shape_2=[config.frame_seq_len, config.ndim],
                                             seq_len = config.sub_seq_len * config.nsubseq,
+                                            nclasses = config.nclass_data,
                                             shuffle=False)
-    train_gen_wrapper.compute_eeg_normalization_params()
-    train_gen_wrapper.compute_eog_normalization_params()
-    train_gen_wrapper.compute_emg_normalization_params()
-    test_gen_wrapper.set_eeg_normalization_params(train_gen_wrapper.eeg_meanX, train_gen_wrapper.eeg_stdX)
-    test_gen_wrapper.set_eog_normalization_params(train_gen_wrapper.eog_meanX, train_gen_wrapper.eog_stdX)
-    test_gen_wrapper.set_emg_normalization_params(train_gen_wrapper.emg_meanX, train_gen_wrapper.emg_stdX)
+    test_gen_wrapper.compute_eeg_normalization_params_by_signal()
+    test_gen_wrapper.compute_eog_normalization_params_by_signal()
+    test_gen_wrapper.compute_emg_normalization_params_by_signal()
     nchannel = 3
 
 config.nchannel = nchannel
-
-# do not need training data anymore
-del train_gen_wrapper
 
 with tf.Graph().as_default():
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_usage, allow_growth=False)
@@ -198,12 +202,10 @@ with tf.Graph().as_default():
 
         def _evaluate(gen):
             # Validate the model on the entire data in gen
-            output_loss =0
-            total_loss = 0
-            yhat = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq])
-            score = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq, config.nclass])
 
-            factor = 20*4
+            score = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq, config.nclass_model])
+
+            factor = 10
 
             # use 10x of minibatch size to speed up
             num_batch_per_epoch = np.floor(len(gen.data_index) / (factor*config.batch_size)).astype(np.uint32)
@@ -211,27 +213,18 @@ with tf.Graph().as_default():
             while test_step < num_batch_per_epoch:
                 x_batch, y_batch, label_batch_ = gen.next_batch(factor*config.batch_size)
                 output_loss_, total_loss_, yhat_, score_ = dev_step(x_batch, y_batch)
-                output_loss += output_loss_
-                total_loss += total_loss_
                 for s in range(config.nsubseq):
-                    yhat[(test_step - 1) * factor * config.batch_size: test_step * factor * config.batch_size,
-                    s*config.sub_seq_len:(s+1)*config.sub_seq_len] = yhat_[:, s]
                     score[(test_step - 1) * factor * config.batch_size: test_step * factor * config.batch_size,
                     s * config.sub_seq_len:(s + 1) * config.sub_seq_len] = score_[:, s]
                 test_step += 1
             if(gen.pointer < len(gen.data_index)):
                 actual_len, x_batch, y_batch, label_batch_ = gen.rest_batch(factor*config.batch_size)
                 output_loss_, total_loss_, yhat_, score_ = dev_step(x_batch, y_batch)
-                output_loss += output_loss_
-                total_loss += total_loss_
                 for s in range(config.nsubseq):
-                    yhat[(test_step - 1) * factor * config.batch_size: len(gen.data_index),
-                    s * config.sub_seq_len:(s + 1) * config.sub_seq_len] = yhat_[:, s]
                     score[(test_step - 1) * factor * config.batch_size: len(gen.data_index),
                     s * config.sub_seq_len:(s + 1) * config.sub_seq_len] = score_[:, s]
-            yhat = yhat + 1 # make label starting from 1 rather than 0
 
-            return yhat, score, output_loss, total_loss
+            return score
 
 
         def evaluate(gen_wrapper):
@@ -240,46 +233,30 @@ with tf.Graph().as_default():
             yhat = np.zeros([N, config.sub_seq_len*config.nsubseq])
             y = np.zeros([N, config.sub_seq_len*config.nsubseq])
 
-            score = np.zeros([N, config.sub_seq_len*config.nsubseq, config.nclass])
+            score = np.zeros([N, config.sub_seq_len*config.nsubseq, config.nclass_model])
 
             count = 0
             output_loss = 0
             total_loss = 0
             gen_wrapper.new_subject_partition()
+            for data_fold in range(config.num_fold_testing_data):
+                gen_wrapper.next_fold()
+                score_ = _evaluate(gen_wrapper.gen)
 
-            gen_wrapper.next_fold()
-            yhat_, score_, output_loss_, total_loss_ = _evaluate(gen_wrapper.gen)
+                score[count : count + len(gen_wrapper.gen.data_index)] = score_
 
-            output_loss += output_loss_
-            total_loss += total_loss_
+                count += len(gen_wrapper.gen.data_index)
 
-            yhat[count : count + len(gen_wrapper.gen.data_index)] = yhat_
-            score[count : count + len(gen_wrapper.gen.data_index)] = score_
-
-            # groundtruth
-            for n in range(config.sub_seq_len*config.nsubseq):
-                y[count : count + len(gen_wrapper.gen.data_index), n] =\
-                    gen_wrapper.gen.label[gen_wrapper.gen.data_index - (config.sub_seq_len*config.nsubseq - 1) + n]
-            count += len(gen_wrapper.gen.data_index)
-
-            test_acc = np.zeros([config.sub_seq_len*config.nsubseq])
-            for n in range(config.sub_seq_len*config.nsubseq):
-                test_acc[n] = accuracy_score(yhat[:, n], y[:, n]) # excluding the indexes of the recordings
-
-            return test_acc, yhat, score, output_loss, total_loss
+            return score
 
         # evaluation on test data
         start_time = time.time()
-        test_acc, test_yhat, test_score, test_output_loss, test_total_loss = evaluate(gen_wrapper=test_gen_wrapper)
+        test_score = evaluate(gen_wrapper=test_gen_wrapper)
         end_time = time.time()
         with open(os.path.join(out_dir, "test_time.txt"), "a") as text_file:
             text_file.write("{:g}\n".format((end_time - start_time)))
 
         hdf5storage.savemat(os.path.join(out_path, "test_ret.mat"),
-                            {'yhat': test_yhat,
-                             'acc': test_acc,
-                             'score': test_score,
-                             'output_loss': test_output_loss,
-                             'total_loss': test_total_loss},
+                            {'score': test_score},
                             format='7.3')
         test_gen_wrapper.gen.reset_pointer()
