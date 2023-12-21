@@ -97,7 +97,6 @@ config.nhidden1 = FLAGS.nhidden1
 config.nhidden2 = FLAGS.nhidden2
 config.attention_size = FLAGS.attention_size
 
-config.nclass = FLAGS.nclass_data
 config.nclass_data = FLAGS.nclass_data
 config.nclass_model = FLAGS.nclass_model
 config.artifacts_label = FLAGS.artifacts_label
@@ -399,7 +398,7 @@ with tf.Graph().as_default():
 
             yhat = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq])
             # increase the batch size by this factor to better utilize the GPU
-            factor = 20*4
+            factor = 10
 
             # test with minibatch of 10x training minibatch to speed up
             num_batch_per_epoch = np.floor(len(gen.data_index) / (factor*config.batch_size)).astype(np.uint32)
