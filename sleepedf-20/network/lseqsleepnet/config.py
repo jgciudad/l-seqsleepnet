@@ -2,11 +2,11 @@ class Config(object):
     def __init__(self):
         self.sub_seq_len = 10  # subsequence length
         self.nchannel = 1  # number of channels
-        self.nclass = 5
 
         self.nsubseq = 10
 
         self.num_fold_training_data =  7
+        self.num_fold_testing_data = 2
 
         self.learning_rate = 1e-4
         self.l2_reg_lambda = 0.0001
