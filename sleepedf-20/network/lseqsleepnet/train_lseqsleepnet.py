@@ -491,7 +491,7 @@ with tf.Graph().as_default():
                             tracked_acc = eval_bal_acc
 
                         early_stop_count += 1
-                        if(tracked_acc >= best_acc):
+                        if (tracked_acc-best_acc)>=0.001:
                             early_stop_count = 0 # reset
                             best_acc = tracked_acc
                             checkpoint_name = os.path.join(checkpoint_path, 'model_step' + str(current_step) +'.ckpt')
