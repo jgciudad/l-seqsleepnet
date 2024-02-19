@@ -13,20 +13,21 @@ import hdf5storage
 # affective sequence length
 config = dict()
 
-config['nsubseq'] = 10
-config['subseqlen'] = 10
-config['seq_len'] = config['subseqlen']*config['nsubseq']
+# config['nsubseq'] = 10
+# config['subseqlen'] = 10
+# config['seq_len'] = config['subseqlen']*config['nsubseq']
 config['num_fold_testing_data'] = 2
 config['aggregation'] = 'multiplication' # 'multiplication' or 'average'
 config['filter_out_artifacts'] = 1
 config['nclass_model'] = 3
-config['out_dir'] = '/Users/tlj258/Documents/HUMMUSS_paper/outputs/l-seqsleepnet'
+config['out_dir'] = '/Users/tlj258/Library/CloudStorage/OneDrive-UniversityofCopenhagen/Documents/PhD/HUMMUSS_paper/outputs/l-seqsleepnet/reduced_test_set'
 
 n_iterations = 3
 datasets_list = ["kornum", "spindle"]
 cohorts_list = ["a", "d"]
 n_scorers_spindle = 2
-nsubseq_list = [1, 2, 3, 4, 6, 8, 10, 16, 22]
+nsubseq_list = [1, 1, 1, 2, 3, 4, 6, 8, 10, 16, 22]
+subseqlen_list = [3, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10]
 
 
 
@@ -170,12 +171,13 @@ lines['spindle']['cohort_D'] = {'acc': np.zeros((n_iterations, n_scorers_spindle
 for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
 
     config['nsubseq'] = nsubseq
+    config['subseqlen'] = subseqlen_list[nsubseq_idx]
     config['seq_len'] = config['subseqlen']*config['nsubseq']
 
     for dataset in datasets_list:
         if dataset == 'kornum':
                 
-            data_list_file = "/Users/tlj258/Documents/Code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/local/eeg1/test_list.txt"
+            data_list_file = "/Users/tlj258/Code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/local/eeg1/eval_list_reduced.txt"
             label_list = []
             labels, file_sizes = read_groundtruth(data_list_file)
             label_list.extend(list(labels.values()))
@@ -183,7 +185,7 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
             for it in range(n_iterations):
                 pred_list = []
                 
-                output_file = pj(config['out_dir'], 'iteration' + str(it+1), str(nsubseq)+'_'+str(config['subseqlen']), 'testing', dataset, 'test_ret.mat')
+                output_file = pj(config['out_dir'], 'iteration' + str(it+1), str(nsubseq)+'_'+str(config['subseqlen']), 'testing', 'kornum_eval_reduced', 'test_ret.mat')
 
                 preds = aggregate_lseqsleepnet(output_file, file_sizes)
                 pred_list.extend(list(preds.values()))
@@ -208,7 +210,7 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
             for cohort in cohorts_list:
                 for scorer in range(n_scorers_spindle):
                         
-                    data_list_file = pj('/Users/tlj258/Documents/Code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/spindle_data/file_list/local', 'cohort_' + cohort.upper(), 'scorer_' + str(scorer+1), 'eeg1/test_list.txt')
+                    data_list_file = pj('/Users/tlj258/Code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/spindle_data/file_list/local', 'cohort_' + cohort.upper(), 'scorer_' + str(scorer+1), 'eeg1/test_list.txt')
                     label_list = []
                     labels, file_sizes = read_groundtruth(data_list_file)
                     label_list.extend(list(labels.values()))
@@ -236,7 +238,7 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
                 lines['spindle']['cohort_' + cohort.upper()]['avg_precision'][:, nsubseq_idx] = np.mean(lines['spindle']['cohort_' + cohort.upper()]['precision'][:,:,:,nsubseq_idx], axis=(0, 1))
                 lines['spindle']['cohort_' + cohort.upper()]['avg_fscore'][:, nsubseq_idx] = np.mean(lines['spindle']['cohort_' + cohort.upper()]['fscore'][:,:,:,nsubseq_idx], axis=(0, 1))
 
-savemat('metric_lines.mat', lines)
+savemat('metric_lines_eval_reduced.mat', lines)
 
 # lines.
             
