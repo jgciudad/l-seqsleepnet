@@ -44,7 +44,7 @@ tf.app.flags.DEFINE_integer("nhidden2", 64, "Sequence length (default: 20)")
 
 tf.app.flags.DEFINE_integer("nclass_data", 4, "Number of classes in the data (whether artifacts are discarded or not is controlled in nclass_model)")
 tf.app.flags.DEFINE_integer("nclass_model", 3, "Number of classes for sleep stage prediction (i.e. in mice, if artifacts are discarded, then nclass_model=3)")
-tf.app.flags.DEFINE_integer("artifacts_label", 3, "Categorical label of the artifact class in the data")
+tf.app.flags.DEFINE_boolean("artifact_detection", True, "whether masking artifacts in loss")
 tf.app.flags.DEFINE_integer("ndim", 129, "Sequence length (default: 20)")
 tf.app.flags.DEFINE_integer("frame_seq_len", 17, "Sequence length (default: 20)")
 
@@ -97,6 +97,7 @@ config.nhidden1 = FLAGS.nhidden1
 config.nhidden2 = FLAGS.nhidden2
 config.attention_size = FLAGS.attention_size
 
+config.artifact_detection = FLAGS.artifact_detection
 config.nclass_data = FLAGS.nclass_data
 config.nclass_model = FLAGS.nclass_model
 config.artifacts_label = FLAGS.artifacts_label
@@ -125,13 +126,17 @@ if (not eog_active and not emg_active):
                                              num_fold=config.num_fold_training_data, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len=config.sub_seq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label, 
                                              shuffle=True)
     valid_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_eval_data),
                                              num_fold=1, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len = config.sub_seq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=False)
     train_gen_wrapper.compute_eeg_normalization_params_by_signal()
     valid_gen_wrapper.compute_eeg_normalization_params_by_signal()
@@ -144,14 +149,18 @@ elif(eog_active and not emg_active):
                                              num_fold=config.num_fold_training_data, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len=config.sub_seq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=True)
     valid_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_eval_data),
                                              eog_filelist=os.path.abspath(FLAGS.eog_eval_data),
                                              num_fold=1, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len = config.subseq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=False)
     train_gen_wrapper.compute_eeg_normalization_params_by_signal()
     train_gen_wrapper.compute_eog_normalization_params_by_signal()
@@ -166,7 +175,9 @@ elif(eog_active and emg_active):
                                              num_fold=config.num_fold_training_data, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len=config.sub_seq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=True)
     valid_gen_wrapper = DataGeneratorWrapper(eeg_filelist=os.path.abspath(FLAGS.eeg_eval_data),
                                              eog_filelist=os.path.abspath(FLAGS.eog_eval_data),
@@ -174,7 +185,9 @@ elif(eog_active and emg_active):
                                              num_fold=1, # load all data in one go
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len=config.sub_seq_len* config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=False)
     train_gen_wrapper.compute_eeg_normalization_params_by_signal()
     train_gen_wrapper.compute_eog_normalization_params_by_signal()
@@ -430,7 +443,7 @@ with tf.Graph().as_default():
                     yhat_n = yhat[:,n]
                     y_n = gen.label[gen.data_index - (config.sub_seq_len*config.nsubseq - 1) + n]
 
-                    if config.nclass_model != config.nclass_data and config.artifacts_label != None:
+                    if config.nclasses_model != config.nclasses_data and config.artifacts_label != None:
                         yhat_n = yhat_n[y_n != config.artifacts_label+1]
                         y_n = y_n[y_n != config.artifacts_label+1]
 

@@ -8,7 +8,7 @@ import numpy as np
 import h5py
 
 class DataGenerator3:
-    def __init__(self, list_of_files, file_sizes, data_shape_2=np.array([29, 129]), seq_len = 200, Ncat = 4):
+    def __init__(self, list_of_files, file_sizes, data_shape_2=np.array([29, 129]), seq_len = 200, Ncat = 4, artifact_detection = False, artifacts_label = 3):
         '''
         Mini-batch data generator (L-seqsleepnet only uses time-frequency data). This is very much similar to SeqSleepNet.
         Args:
@@ -29,7 +29,9 @@ class DataGenerator3:
         self.boundary_index = np.array([])
 
         self.seq_len = seq_len
-        self.Ncat = Ncat # five-class sleep staging
+        self.Ncat = Ncat 
+        self.artifact_detection = artifact_detection
+        self.artifacts_label = artifacts_label
 
         self.pointer = 0
         self.data_index = None
@@ -69,6 +71,10 @@ class DataGenerator3:
         X2 = np.transpose(X2, (2, 1, 0))  # rearrange dimension
         # X2 = X2[:,:,1:] # excluding 0-th element
         y = np.array(data['y']) # one-hot encoding labels
+        if self.artifact_detection == True:
+            y_arts = y[self.artifacts_label]
+            y_no_arts = (y_arts != 1).astype(float)
+            y = np.vstack([y_no_arts, y_arts])
         y = np.transpose(y, (1, 0))  # rearrange dimension
         label = np.array(data['label']) # labels
         label = np.transpose(label, (1, 0))  # rearrange dimension

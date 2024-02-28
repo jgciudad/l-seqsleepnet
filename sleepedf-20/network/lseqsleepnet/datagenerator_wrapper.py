@@ -3,7 +3,7 @@ import h5py
 from datagenerator_from_list_v3 import DataGenerator3
 
 class DataGeneratorWrapper:
-    def __init__(self, eeg_filelist=None, eog_filelist=None, emg_filelist=None, num_fold=1, data_shape_2=np.array([29, 128]), seq_len = 20, nclasses=4, shuffle=False):
+    def __init__(self, eeg_filelist=None, eog_filelist=None, emg_filelist=None, num_fold=1, data_shape_2=np.array([29, 128]), seq_len = 20, nclasses = 4, artifact_detection = False, artifacts_label = 3, shuffle=False):
 
         # Init params
 
@@ -22,7 +22,9 @@ class DataGeneratorWrapper:
         self.sub_folds = []
 
         self.seq_len = seq_len
-        self.Ncat = nclasses # five-class sleep staging
+        self.Ncat = nclasses
+        self.artifact_detection = artifact_detection
+        self.artifacts_label = artifacts_label
 
         self.shuffle = shuffle
 
@@ -188,7 +190,9 @@ class DataGeneratorWrapper:
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
                                  seq_len=self.seq_len,
-                                 Ncat=self.Ncat)
+                                 Ncat=self.Ncat, 
+                                 artifact_detection=self.artifact_detection,
+                                 artifacts_label=self.artifacts_label)
         self.gen.normalize_by_signal(self.eeg_meanX, self.eeg_stdX)
 
         if(len(self.eog_list_of_files) > 0):
@@ -197,7 +201,9 @@ class DataGeneratorWrapper:
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
                                  seq_len=self.seq_len,
-                                 Ncat=self.Ncat)
+                                 Ncat=self.Ncat, 
+                                 artifact_detection=self.artifact_detection, 
+                                 artifacts_label=self.artifacts_label)
             eog_gen.normalize_by_signal(self.eog_meanX, self.eog_stdX)
 
         if(len(self.emg_list_of_files) > 0):
@@ -206,7 +212,9 @@ class DataGeneratorWrapper:
                                  file_sizes,
                                  data_shape_2=self.data_shape_2,
                                  seq_len=self.seq_len,
-                                 Ncat=self.Ncat)
+                                 Ncat=self.Ncat, 
+                                 artifact_detection=self.artifact_detection, 
+                                 artifacts_label=self.artifacts_label)
             emg_gen.normalize_by_signal(self.emg_meanX, self.emg_stdX)
 
         # 1-channel case when both eog and emg not active
