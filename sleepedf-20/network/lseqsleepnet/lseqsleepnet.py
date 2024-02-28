@@ -11,7 +11,7 @@ class LSeqSleepNet(object):
         self.config = config
 
         self.input_x = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.frame_seq_len, self.config.ndim, self.config.nchannel], name="input_x")
-        self.input_y = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass_data], name="input_y")
+        self.input_y = tf.placeholder(tf.float32, [None, self.config.nsubseq, self.config.sub_seq_len, self.config.nclasses_data], name="input_y")
 
         self.dropout_rnn = tf.placeholder(tf.float32, name="dropout_rnn")
         self.istraining = tf.placeholder(tf.bool, name='istraining') # idicate training for batch normmalization
@@ -43,60 +43,78 @@ class LSeqSleepNet(object):
             fc1 = dropout(fc1, self.dropout_rnn)
             fc2 = fc(fc1, self.config.fc_size, self.config.fc_size, name="fc2", relu=True)
             fc2 = dropout(fc2, self.dropout_rnn)
-            self.score = fc(fc2, self.config.fc_size, self.config.nclass_model, name="output", relu=False)
-            self.prediction = tf.argmax(self.score, 1, name="pred")
-            self.score = tf.reshape(self.score, [-1, self.config.nsubseq, self.config.sub_seq_len, self.config.nclass_model])
+            self.score = fc(fc2, self.config.fc_size, self.config.nclasses_model, name="output", relu=False)
+
+            if self.config.nclasses_model > 1:
+                self.prediction = tf.argmax(self.score, 1, name="pred")
+            elif self.config.nclasses_model == 1:
+                prediction = tf.math.greater(tf.nn.sigmoid(self.score), 0.5)
+                prediction = tf.where(prediction, tf.ones(tf.shape(self.score)), tf.zeros(tf.shape(self.score)), name="pred") # boolean to binary
+                self.prediction = tf.cast(prediction, dtype=tf.int64)
+            self.score = tf.reshape(self.score, [-1, self.config.nsubseq, self.config.sub_seq_len, self.config.nclasses_model])
             self.prediction = tf.reshape(self.prediction, [-1, self.config.nsubseq, self.config.sub_seq_len])
 
         # calculate sequence cross-entropy output loss
         with tf.name_scope("output-loss"):
-
             if self.config.loss_type == 'normal_ce':
                 input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
-                input_y_categorical = tf.reshape(input_y_categorical, [-1])
-                scores = tf.reshape(self.score, [-1, self.config.nclass_model])
-                scores = tf.nn.softmax(scores)
+                scores = tf.reshape(self.score, [-1, self.config.nclasses_model])
 
-                if self.config.nclass_model == self.config.nclass_data:
-                    cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                if self.config.nclasses_model > 1:
+                    input_y_categorical = tf.reshape(input_y_categorical, [-1]) # in categorical ce labels need to be 1-dimensional and scores 2-dimensional
+                    scores = tf.nn.softmax(scores)
+
+                    if self.config.mask_artifacts == False:
+                        cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                        n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
+                    elif self.config.mask_artifacts == True:
+                        artifacts_column = tf.zeros([tf.shape(scores)[0],1])
+                        scores = tf.concat([scores, artifacts_column], 1)
+
+                        artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
+                        artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+
+                        cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                        cce = tf.multiply(cce, artifact_mask)
+
+                        n_elements_in_batch = tf.reduce_sum(artifact_mask)
+                elif self.config.nclasses_model == 1:
+                    input_y_categorical = tf.reshape(input_y_categorical, [-1, config.nclasses_model]) # in binary ce both labels and scores need to be 2-dimensional
+                    scores = tf.nn.sigmoid(scores)
+                    cce = tf.keras.metrics.binary_crossentropy(y_true=tf.cast(input_y_categorical, tf.float32), y_pred=scores, from_logits=False)
                     n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
-
-                elif self.config.nclass_model != self.config.nclass_data and self.config.artifacts_label != None:
-                    artifacts_column = tf.zeros([tf.shape(scores)[0],1])
-                    scores = tf.concat([scores, artifacts_column], 1)
-
-                    artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
-                    artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
-
-                    cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
-                    cce = tf.multiply(cce, artifact_mask)
-
-                    n_elements_in_batch = tf.reduce_sum(artifact_mask)
-
 
                 cce = tf.reduce_sum(cce)
                 self.output_loss = cce / n_elements_in_batch # average over sequence length and (not-artifacts) elements in batch
 
             elif self.config.loss_type == 'weighted_ce':
                 input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
-                input_y_categorical = tf.reshape(input_y_categorical, [-1])
-                scores = tf.reshape(self.score, [-1, self.config.nclass_model])
-                scores = tf.nn.softmax(scores)
+                scores = tf.reshape(self.score, [-1, self.config.nclasses_model])
 
-                if self.config.nclass_model == self.config.nclass_data:
-                    cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                if self.config.nclasses_model > 1:
+                    input_y_categorical = tf.reshape(input_y_categorical, [-1]) # in categorical ce labels need to be 1-dimensional and scores 2-dimensional
+                    scores = tf.nn.softmax(scores)
+
+                    if self.config.mask_artifacts == False:
+                        cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                        n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
+                    elif self.config.mask_artifacts == True:
+                        artifacts_column = tf.zeros([tf.shape(scores)[0],1])
+                        scores = tf.concat([scores, artifacts_column], 1)
+
+                        artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
+                        artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
+
+                        cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
+                        cce = tf.multiply(cce, artifact_mask)
+
+                        n_elements_in_batch = tf.reduce_sum(artifact_mask)
+
+                elif self.config.nclasses_model == 1:
+                    input_y_categorical = tf.reshape(input_y_categorical, [-1, config.nclasses_model]) # in binary ce both labels and scores need to be 2-dimensional
+                    scores = tf.nn.sigmoid(scores)
+                    cce = tf.keras.metrics.binary_crossentropy(y_true=tf.cast(input_y_categorical, tf.float32), y_pred=scores, from_logits=False)
                     n_elements_in_batch = tf.cast(tf.size(cce), dtype=tf.float32)
-                elif self.config.nclass_model != self.config.nclass_data and self.config.artifacts_label != None:
-                    artifacts_column = tf.zeros([tf.shape(scores)[0],1])
-                    scores = tf.concat([scores, artifacts_column], 1)
-
-                    artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
-                    artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
-
-                    cce = tf.keras.metrics.sparse_categorical_crossentropy(y_true=input_y_categorical, y_pred=scores, from_logits=False)
-                    cce = tf.multiply(cce, artifact_mask)
-
-                    n_elements_in_batch = tf.reduce_sum(artifact_mask)
 
                 class_counts = []
                 def cond_function_true_wce(cce, n_elements_in_batch, n_classes_in_batch, labels_class_i_binary, labels_class_i_bool):
@@ -114,7 +132,12 @@ class LSeqSleepNet(object):
 
                     return identical_cce
                 
-                for i in range(self.config.nclass_model):
+                if config.nclasses_model == 1:
+                    loop_range = 2
+                else:
+                    loop_range = config.nclasses_model
+
+                for i in range(loop_range):
                     labels_class_i = tf.equal(input_y_categorical, i)
                     labels_class_i = tf.where(labels_class_i, tf.ones(tf.shape(labels_class_i)), tf.zeros(tf.shape(labels_class_i))) # boolean artifact mask to binary
                     
@@ -122,7 +145,7 @@ class LSeqSleepNet(object):
                 
                 n_classes_in_batch = tf.math.count_nonzero(class_counts, dtype=tf.dtypes.float32)
 
-                for i in range(self.config.nclass_model):
+                for i in range(loop_range):
                     labels_class_i_bool = tf.equal(input_y_categorical, i)
                     labels_class_i_binary = tf.where(labels_class_i_bool, tf.ones(tf.shape(labels_class_i_bool)), tf.zeros(tf.shape(labels_class_i_bool))) # boolean artifact mask to binary
 
@@ -142,22 +165,21 @@ class LSeqSleepNet(object):
             self.loss = self.output_loss + self.config.l2_reg_lambda*l2_loss
 
         with tf.name_scope("accuracy"):
-            y = tf.reshape(self.input_y, [-1, self.config.nclass_data])
-            input_y_categorical = tf.math.argmax(y, -1) # dummy labels to numbers
+            input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
+            input_y_categorical = tf.reshape(input_y_categorical, [-1]) 
             yhat = tf.reshape(self.prediction, [-1,])
 
             correct_prediction = tf.equal(yhat, input_y_categorical)
             correct_prediction = tf.where(correct_prediction, tf.ones(tf.shape(correct_prediction)), tf.zeros(tf.shape(correct_prediction)))
 
-            if self.config.nclass_model == self.config.nclass_data:
+            if self.config.mask_artifacts == False:
                 self.accuracy = tf.reduce_sum(tf.cast(correct_prediction, tf.int32)) / tf.size(correct_prediction)
-            elif self.config.nclass_model != self.config.nclass_data and self.config.artifacts_label != None:
+            elif self.config.mask_artifacts == True:
                 artifact_mask = tf.not_equal(input_y_categorical, self.config.artifacts_label) # artifact mask (boolean)
                 artifact_mask = tf.where(artifact_mask, tf.ones(tf.shape(artifact_mask)), tf.zeros(tf.shape(artifact_mask))) # boolean artifact mask to binary
                 correct_prediction_masked = tf.multiply(correct_prediction, artifact_mask)
                 self.accuracy = tf.reduce_sum(correct_prediction_masked) / tf.reduce_sum(artifact_mask)
         
-        self.class_labels=[]
         with tf.name_scope("balanced_accuracy"):
             def cond_function_true(prediction_class_i, labels_class_i, recalls_sum, n_classes_in_balanced_accuracy):
                 correct_prediction_class_i = tf.multiply(prediction_class_i, labels_class_i)
@@ -179,14 +201,17 @@ class LSeqSleepNet(object):
             
             input_y_categorical = tf.math.argmax(self.input_y, -1) # dummy labels to numbers
 
-            for i in range(self.config.nclass_model):
+            if self.config.nclasses_model == 1:
+                loop_range = 2
+            else:
+                loop_range = self.config.nclasses_model
+
+            for i in range(loop_range):
                 prediction_class_i = tf.equal(self.prediction, i)
                 labels_class_i = tf.equal(input_y_categorical, i)
                 prediction_class_i = tf.where(prediction_class_i, tf.ones(tf.shape(prediction_class_i)), tf.zeros(tf.shape(prediction_class_i))) # boolean artifact mask to binary
                 labels_class_i = tf.where(labels_class_i, tf.ones(tf.shape(labels_class_i)), tf.zeros(tf.shape(labels_class_i))) # boolean artifact mask to binary
                 
-                self.class_labels.append(tf.reduce_sum(labels_class_i))
-
                 [recalls_sum, n_classes_in_balanced_accuracy]  = tf.cond(tf.reduce_sum(labels_class_i) > 0, lambda: cond_function_true(prediction_class_i, labels_class_i, recalls_sum, n_classes_in_balanced_accuracy), lambda: cond_function_false(recalls_sum, n_classes_in_balanced_accuracy))
 
             self.balanced_accuracy = recalls_sum / n_classes_in_balanced_accuracy
