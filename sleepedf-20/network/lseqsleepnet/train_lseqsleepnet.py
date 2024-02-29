@@ -348,7 +348,7 @@ with tf.Graph().as_default():
                     yhat_n = yhat[:,n]
                     y_n = gen.label[gen.data_index - (config.sub_seq_len*config.nsubseq - 1) + n]
 
-                    if config.nclasses_model != config.nclasses_data and config.artifacts_label != None:
+                    if config.mask_artifacts == True:
                         yhat_n = yhat_n[y_n != config.artifacts_label+1]
                         y_n = y_n[y_n != config.artifacts_label+1]
 
