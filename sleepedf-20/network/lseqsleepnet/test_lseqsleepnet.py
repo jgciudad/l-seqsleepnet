@@ -21,8 +21,8 @@ import time
 # ==================================================
 
 # Misc Parameters
-tf.app.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft device placement")
-tf.app.flags.DEFINE_boolean("log_device_placement", False, "Log placement of ops on devices")
+tf.app.flags.DEFINE_string("allow_soft_placement", 'True', "Allow device soft device placement")
+tf.app.flags.DEFINE_string("log_device_placement", 'False', "Log placement of ops on devices")
 
 # My Parameters
 tf.app.flags.DEFINE_string("eeg_test_data", "", "file containing the list of test EEG data")
@@ -40,8 +40,8 @@ tf.app.flags.DEFINE_integer("nhidden2", 64, "Sequence length (default: 20)")
 
 tf.app.flags.DEFINE_integer("batch_size", 8, "Number of instances per mini-batch (default: 32)")
 tf.app.flags.DEFINE_integer("nclasses_data", 4, "Number of classes in the data (whether artifacts are discarded or not is controlled in nclasses_model)")
-tf.app.flags.DEFINE_boolean("mask_artifacts", False, "whether masking artifacts in loss")
-tf.app.flags.DEFINE_boolean("artifact_detection", True, "whether masking artifacts in loss")
+tf.app.flags.DEFINE_string("mask_artifacts", 'False', "whether masking artifacts in loss")
+tf.app.flags.DEFINE_string("artifact_detection", 'False', "whether just predicting if an epoch is an artifact")
 tf.app.flags.DEFINE_integer("ndim", 129, "Sequence length (default: 20)")
 tf.app.flags.DEFINE_integer("frame_seq_len", 17, "Sequence length (default: 20)")
 
@@ -89,16 +89,27 @@ config.nhidden1 = FLAGS.nhidden1
 config.nhidden2 = FLAGS.nhidden2
 config.attention_size = FLAGS.attention_size
 
-config.mask_artifacts = FLAGS.mask_artifacts
-config.artifact_detection = FLAGS.artifact_detection
-if FLAGS.artifact_detection == True:
+# Pass boolean flags from string to bool
+# The reason is that tensorflow boolean flags don't look at the value specified in the command line. Whenever a boolean flag is present in the command line, it will evaluate to True.
+boolean_flags = [
+    'allow_soft_placement', 
+    'log_device_placement', 
+    'mask_artifacts',
+    'artifact_detection',
+    'early_stopping'
+]
+for bf in boolean_flags:
+    assert getattr(FLAGS, bf)=='True' or getattr(FLAGS, bf)=='False', "%s must be either a string and either 'True' or 'False'" % bf
+    setattr(config, bf, getattr(FLAGS, bf)=='True')
+
+if config.artifact_detection == True:
     config.artifacts_label = FLAGS.nclasses_data - 1 # right now the code probably just works when the artifact label is the last one
     config.nclasses_model = 1
     config.nclasses_data = 2
-    assert FLAGS.mask_artifacts == False, "mask_artifacts must be False if artifact_detection=True"
+    assert config.mask_artifacts == False, "mask_artifacts must be False if artifact_detection=True"
     print('Artifact detection is active. nclasses_data set to 2, nclasses_model set to 1.')
-elif FLAGS.artifact_detection == False:
-    if FLAGS.mask_artifacts == True:
+elif config.artifact_detection == False:
+    if config.mask_artifacts == True:
         config.nclasses_data = FLAGS.nclasses_data
         config.artifacts_label = FLAGS.nclasses_data - 1 # right now the code probably just works when the artifact label is the last one
         config.nclasses_model = config.nclasses_data - 1 
@@ -169,8 +180,8 @@ config.nchannel = nchannel
 with tf.Graph().as_default():
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_usage, allow_growth=False)
     session_conf = tf.ConfigProto(
-      allow_soft_placement=FLAGS.allow_soft_placement,
-      log_device_placement=FLAGS.log_device_placement,
+      allow_soft_placement=config.allow_soft_placement,
+      log_device_placement=config.log_device_placement,
       gpu_options=gpu_options)
     sess = tf.Session(config=session_conf)
     with sess.as_default():
