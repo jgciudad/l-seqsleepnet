@@ -96,7 +96,6 @@ boolean_flags = [
     'log_device_placement', 
     'mask_artifacts',
     'artifact_detection',
-    'early_stopping'
 ]
 for bf in boolean_flags:
     assert getattr(FLAGS, bf)=='True' or getattr(FLAGS, bf)=='False', "%s must be either a string and either 'True' or 'False'" % bf
