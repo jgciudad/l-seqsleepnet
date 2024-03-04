@@ -13,22 +13,23 @@ import hdf5storage
 # affective sequence length
 config = dict()
 
-# config['nsubseq'] = 10
-# config['subseqlen'] = 10
-# config['seq_len'] = config['subseqlen']*config['nsubseq']
 config['num_fold_testing_data'] = 2
 config['aggregation'] = 'multiplication' # 'multiplication' or 'average'
-config['filter_out_artifacts'] = 1
-config['nclass_model'] = 3
-config['out_dir'] = '/Users/tlj258/Library/CloudStorage/OneDrive-UniversityofCopenhagen/Documents/PhD/HUMMUSS_paper/outputs/l-seqsleepnet/reduced_test_set'
-
-n_iterations = 3
-datasets_list = ["kornum", "spindle"]
-cohorts_list = ["a", "d"]
-n_scorers_spindle = 2
-nsubseq_list = [1, 1, 1, 2, 3, 4, 6, 8, 10, 16, 22]
-subseqlen_list = [3, 7, 10, 10, 10, 10, 10, 10, 10, 10, 10]
-
+config['nclasses_data'] = 4
+config['out_dir'] = '/Users/tlj258/Library/CloudStorage/OneDrive-UniversityofCopenhagen/Documents/PhD/HUMMUSS_paper/outputs/l-seqsleepnet/reduced_test_set' # path to the directory of test_ret.mat, or results subdirectories
+config['mask_artifacts'] = True
+n_iterations = 1 # number of models trained. The final metrics are the average across the different iterations
+datasets_list = ["kornum", "spindle"] # datasets to evaluate
+cohorts_list = ["a", "d"] # cohorts used in spindle dataset
+n_scorers_spindle = 2 # 
+nsubseq_list = [8]
+subseqlen_list = [10] # subseqlen_list must have the same length as nsubseq_list
+assert len(nsubseq_list) == len(subseqlen_list), "subseqlen_list must have the same length as nsubseq_list"
+if config['mask_artifacts'] == True:
+    config['artifacts_label'] = config['nclasses_data'] # right now the code probably just works when the artifact label is the last one # in this script the labels start from 1 (different to training and test script)
+    config['nclasses_model'] = config['nclasses_data'] - 1 
+else:
+    config['nclasses_model'] = config['nclasses_data']
 
 
 def read_groundtruth(filelist):
@@ -61,7 +62,7 @@ def softmax(z):
 def aggregate_avg(score):
     fused_score = None
     for i in range(config['seq_len']):
-        prob_i = np.concatenate((np.zeros((config['seq_len'] - 1, config['nclass_model'])), softmax(np.squeeze(score[i, :, :]))), axis=0)
+        prob_i = np.concatenate((np.zeros((config['seq_len'] - 1, config['nclasses_model'])), softmax(np.squeeze(score[i, :, :]))), axis=0)
         prob_i = np.roll(prob_i, -(config['seq_len'] - i - 1), axis=0)
         if fused_score is None:
             fused_score = prob_i
@@ -75,7 +76,7 @@ def aggregate_mul(score):
     fused_score = None
     for i in range(config['seq_len']):
         prob_i = np.log10(softmax(np.squeeze(score[i, :, :])))
-        prob_i = np.concatenate((np.ones((config['seq_len'] - 1, config['nclass_model'])), prob_i), axis=0)
+        prob_i = np.concatenate((np.ones((config['seq_len'] - 1, config['nclasses_model'])), prob_i), axis=0)
         prob_i = np.roll(prob_i, -(config['seq_len'] - i - 1), axis=0)
         if fused_score is None:
             fused_score = prob_i
@@ -102,17 +103,15 @@ def aggregate_lseqsleepnet(output_file, file_sizes):
 def calculate_metrics(labels, preds):
     ret = dict()
 
-    if config['nclass_model'] == 3:
-        preds = preds[labels != 4]
-        labels = labels[labels != 4]
+    if config['mask_artifacts'] == True:
+        preds = preds[labels != config['artifacts_label']]
+        labels = labels[labels != config['artifacts_label']]
 
-    #labels = np.hstack(list(labels.values()))
-    #preds = np.hstack(list(preds.values()))
     ret['acc'] = metrics.accuracy_score(y_true=labels, y_pred=preds)
     ret['bal_acc'] = metrics.balanced_accuracy_score(y_true=labels, y_pred=preds)
-    ret['F1'] = metrics.f1_score(y_true=labels, y_pred=preds, labels=np.arange(1, config['nclass_model']+1), average=None)
+    ret['F1'] = metrics.f1_score(y_true=labels, y_pred=preds, labels=np.arange(1, config['nclasses_model']+1), average=None)
     ret['mean-F1'] = np.mean(ret['F1'])
-    ret['kappa'] = metrics.cohen_kappa_score(y1=labels, y2=preds, labels=np.arange(1, config['nclass_model']+1))
+    ret['kappa'] = metrics.cohen_kappa_score(y1=labels, y2=preds, labels=np.arange(1, config['nclasses_model']+1))
     ret['sensitivity'] = sensitivity_score(y_true=labels, y_pred=preds, average=None)
     ret['precision'] = metrics.precision_score(y_true=labels, y_pred=preds, average=None)
     C = metrics.confusion_matrix(y_true=labels, y_pred=preds)
@@ -177,7 +176,7 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
     for dataset in datasets_list:
         if dataset == 'kornum':
                 
-            data_list_file = "/Users/tlj258/Code/HUMMUSS/SleepTransformer_mice/shhs/data_preprocessing/kornum_data/file_list/local/eeg1/eval_list_reduced.txt"
+            data_list_file = "/home/s202283/code/l-seqsleepnet/file_lists/kornum_data/eeg1/test_list.txt"
             label_list = []
             labels, file_sizes = read_groundtruth(data_list_file)
             label_list.extend(list(labels.values()))
@@ -185,7 +184,8 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
             for it in range(n_iterations):
                 pred_list = []
                 
-                output_file = pj(config['out_dir'], 'iteration' + str(it+1), str(nsubseq)+'_'+str(config['subseqlen']), 'testing', 'kornum_eval_reduced', 'test_ret.mat')
+                # output_file = pj(config['out_dir'], 'iteration' + str(it+1), str(nsubseq)+'_'+str(config['subseqlen']), 'testing', 'kornum_eval_reduced', 'test_ret.mat')
+                output_file = "/home/s202283/outputs/l-seqsleepnet/prueba_students_stages/test_ret.mat"
 
                 preds = aggregate_lseqsleepnet(output_file, file_sizes)
                 pred_list.extend(list(preds.values()))
@@ -238,15 +238,4 @@ for nsubseq_idx, nsubseq in enumerate(nsubseq_list):
                 lines['spindle']['cohort_' + cohort.upper()]['avg_precision'][:, nsubseq_idx] = np.mean(lines['spindle']['cohort_' + cohort.upper()]['precision'][:,:,:,nsubseq_idx], axis=(0, 1))
                 lines['spindle']['cohort_' + cohort.upper()]['avg_fscore'][:, nsubseq_idx] = np.mean(lines['spindle']['cohort_' + cohort.upper()]['fscore'][:,:,:,nsubseq_idx], axis=(0, 1))
 
-savemat('metric_lines_eval_reduced.mat', lines)
-
-# lines.
-            
-
-        # elif dataset == 'spindle':
-        #     for c in cohorts_list:
-
-
-# print results
-# for repeat in range(config.num_repeat):
-#     print(results['Repeat' + str(repeat+1)])
+savemat('metric_lines.mat', lines)
