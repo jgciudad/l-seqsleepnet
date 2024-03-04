@@ -39,9 +39,9 @@ tf.app.flags.DEFINE_integer("attention_size", 64, "Sequence length (default: 20)
 tf.app.flags.DEFINE_integer("nhidden2", 64, "Sequence length (default: 20)")
 
 tf.app.flags.DEFINE_integer("batch_size", 8, "Number of instances per mini-batch (default: 32)")
-tf.app.flags.DEFINE_integer("nclass_data", 4, "Number of classes in the data (whether artifacts are discarded or not is controlled in nclass_model)")
-tf.app.flags.DEFINE_integer("nclass_model", 3, "Number of classes for sleep stage prediction (i.e. in mice, if artifacts are discarded, then nclass_model=3)")
-tf.app.flags.DEFINE_integer("artifacts_label", 3, "Categorical label of the artifact class in the data")
+tf.app.flags.DEFINE_integer("nclasses_data", 4, "Number of classes in the data (whether artifacts are discarded or not is controlled in nclasses_model)")
+tf.app.flags.DEFINE_boolean("mask_artifacts", False, "whether masking artifacts in loss")
+tf.app.flags.DEFINE_boolean("artifact_detection", True, "whether masking artifacts in loss")
 tf.app.flags.DEFINE_integer("ndim", 129, "Sequence length (default: 20)")
 tf.app.flags.DEFINE_integer("frame_seq_len", 17, "Sequence length (default: 20)")
 
@@ -89,9 +89,23 @@ config.nhidden1 = FLAGS.nhidden1
 config.nhidden2 = FLAGS.nhidden2
 config.attention_size = FLAGS.attention_size
 
-config.nclass_data = FLAGS.nclass_data
-config.nclass_model = FLAGS.nclass_model
-config.artifacts_label = FLAGS.artifacts_label
+config.mask_artifacts = FLAGS.mask_artifacts
+config.artifact_detection = FLAGS.artifact_detection
+if FLAGS.artifact_detection == True:
+    config.artifacts_label = FLAGS.nclasses_data - 1 # right now the code probably just works when the artifact label is the last one
+    config.nclasses_model = 1
+    config.nclasses_data = 2
+    assert FLAGS.mask_artifacts == False, "mask_artifacts must be False if artifact_detection=True"
+    print('Artifact detection is active. nclasses_data set to 2, nclasses_model set to 1.')
+elif FLAGS.artifact_detection == False:
+    if FLAGS.mask_artifacts == True:
+        config.nclasses_data = FLAGS.nclasses_data
+        config.artifacts_label = FLAGS.nclasses_data - 1 # right now the code probably just works when the artifact label is the last one
+        config.nclasses_model = config.nclasses_data - 1 
+    else:
+        config.nclasses_data = FLAGS.nclasses_data
+        config.nclasses_model = config.nclasses_data
+        config.artifacts_label = FLAGS.nclasses_data - 1 # right now the code probably just works when the artifact label is the last one
 config.ndim = FLAGS.ndim
 config.frame_seq_len = FLAGS.frame_seq_len
 config.best_model_criteria = FLAGS.best_model_criteria
@@ -112,7 +126,9 @@ if (not eog_active and not emg_active):
                                              num_fold=config.num_fold_testing_data,
                                              data_shape_2=[config.frame_seq_len, config.ndim],
                                              seq_len = config.sub_seq_len * config.nsubseq,
-                                             nclasses = config.nclass_data,
+                                             nclasses = config.nclasses_data, 
+                                             artifact_detection = config.artifact_detection,
+                                             artifacts_label = config.artifacts_label,
                                              shuffle=False)
     test_gen_wrapper.compute_eeg_normalization_params_by_signal()
     nchannel = 1
@@ -124,7 +140,9 @@ elif(eog_active and not emg_active):
                                             num_fold=config.num_fold_testing_data,
                                             data_shape_2=[config.frame_seq_len, config.ndim],
                                             seq_len = config.sub_seq_len * config.nsubseq,
-                                            nclasses = config.nclass_data,
+                                            nclasses = config.nclasses_data, 
+                                            artifact_detection = config.artifact_detection,
+                                            artifacts_label = config.artifacts_label,
                                             shuffle=False)
     test_gen_wrapper.compute_eeg_normalization_params_by_signal()
     test_gen_wrapper.compute_eog_normalization_params_by_signal()
@@ -137,7 +155,9 @@ elif(eog_active and emg_active):
                                             num_fold=config.num_fold_testing_data,
                                             data_shape_2=[config.frame_seq_len, config.ndim],
                                             seq_len = config.sub_seq_len * config.nsubseq,
-                                            nclasses = config.nclass_data,
+                                            nclasses = config.nclasses_data, 
+                                            artifact_detection = config.artifact_detection,
+                                            artifacts_label = config.artifacts_label,
                                             shuffle=False)
     test_gen_wrapper.compute_eeg_normalization_params_by_signal()
     test_gen_wrapper.compute_eog_normalization_params_by_signal()
@@ -203,7 +223,7 @@ with tf.Graph().as_default():
         def _evaluate(gen):
             # Validate the model on the entire data in gen
 
-            score = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq, config.nclass_model])
+            score = np.zeros([len(gen.data_index), config.sub_seq_len*config.nsubseq, config.nclasses_model])
 
             factor = 10
 
@@ -233,7 +253,7 @@ with tf.Graph().as_default():
             yhat = np.zeros([N, config.sub_seq_len*config.nsubseq])
             y = np.zeros([N, config.sub_seq_len*config.nsubseq])
 
-            score = np.zeros([N, config.sub_seq_len*config.nsubseq, config.nclass_model])
+            score = np.zeros([N, config.sub_seq_len*config.nsubseq, config.nclasses_model])
 
             count = 0
             output_loss = 0
