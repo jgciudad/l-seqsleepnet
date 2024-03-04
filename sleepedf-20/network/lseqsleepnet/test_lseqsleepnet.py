@@ -98,7 +98,7 @@ boolean_flags = [
     'artifact_detection',
 ]
 for bf in boolean_flags:
-    assert getattr(FLAGS, bf)=='True' or getattr(FLAGS, bf)=='False', "%s must be either a string and either 'True' or 'False'" % bf
+    assert getattr(FLAGS, bf)=='True' or getattr(FLAGS, bf)=='False', "%s must be a string and either 'True' or 'False'" % bf
     setattr(config, bf, getattr(FLAGS, bf)=='True')
 
 if config.artifact_detection == True:
