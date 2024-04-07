@@ -229,7 +229,7 @@ valid_gen_wrapper.next_fold()
 config.nchannel = nchannel
 
 # variable to keep track of best accuracy on validation set for model selection
-best_acc = 0.0
+best_metric = 0.0
 
 # Training
 # ==================================================
@@ -415,14 +415,19 @@ with tf.Graph().as_default():
                         _evaluate(gen=valid_gen_wrapper.gen, log_filename="eval_result_log.txt", config=config)
 
                         if config.best_model_criteria == 'accuracy':
-                            tracked_acc = eval_acc
+                            tracked_metric = eval_acc
+                            better_model = (tracked_metric-best_metric)>=0.001
                         elif config.best_model_criteria == 'balanced_accuracy':
-                            tracked_acc = eval_bal_acc
+                            tracked_metric = eval_bal_acc
+                            better_model = (tracked_metric-best_metric)>=0.001
+                        elif config.best_model_criteria == 'output_loss':
+                            tracked_metric = eval_output_loss
+                            better_model = tracked_metric<best_metric
 
                         early_stop_count += 1
-                        if (tracked_acc-best_acc)>=0.001:
+                        if better_model:
                             early_stop_count = 0 # reset
-                            best_acc = tracked_acc
+                            best_metric = tracked_metric
                             checkpoint_name = os.path.join(checkpoint_path, 'model_step' + str(current_step) +'.ckpt')
                             save_path = saver.save(sess, checkpoint_name)
 
@@ -435,7 +440,7 @@ with tf.Graph().as_default():
 
                             # write current best performance to file
                             with open(os.path.join(out_dir, "current_best.txt"), "a") as text_file:
-                                text_file.write("{:g}\n".format(tracked_acc))
+                                text_file.write("{:g}\n".format(tracked_metric))
 
                         valid_gen_wrapper.gen.reset_pointer()
 
